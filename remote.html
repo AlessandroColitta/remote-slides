@@ -1,0 +1,69 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+  <meta name="theme-color" content="#000000">
+  <title>Remote Control</title>
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body style="background: #000000; overflow: hidden;">
+
+  <div class="mobile-app">
+    <!-- Top Header: Connection status, timer, and Exit button (with exit icon) -->
+    <header class="mobile-top-bar">
+      <div class="mobile-status-group">
+        <span id="mobile-status" class="mobile-status-text">Connecting...</span>
+        <span id="mobile-timer" class="mobile-timer">00:00</span>
+      </div>
+
+      <!-- ONLY ICON 1 of 2: Exit Presentation -->
+      <button id="btn-exit" class="mobile-exit-btn" aria-label="Exit Presentation">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M18 6L6 18M6 6l12 12"/>
+        </svg>
+      </button>
+    </header>
+
+    <!-- Slide Indicator -->
+    <div class="mobile-slide-info">
+      <div id="slide-num" class="mobile-slide-num">1</div>
+      <div id="slide-total" class="mobile-slide-total">of 1</div>
+    </div>
+
+    <!-- Progress Line -->
+    <div class="mobile-progress-track">
+      <div id="progress-fill" class="mobile-progress-fill"></div>
+    </div>
+
+    <!-- Main Navigation Touch Zones (ONLY ICONS: Prev and Next) -->
+    <main class="mobile-controls-area">
+      <!-- Previous Slide Button (with Left Arrow icon) -->
+      <button id="btn-prev" class="slide-nav-btn prev" aria-label="Previous Slide">
+        <svg width="34" height="34" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M15 18l-6-6 6-6"/>
+        </svg>
+      </button>
+
+      <!-- Next Slide Button (with Right Arrow icon) -->
+      <button id="btn-next" class="slide-nav-btn next" aria-label="Next Slide">
+        <svg width="42" height="42" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M9 18l6-6-6-6"/>
+        </svg>
+      </button>
+    </main>
+
+    <!-- Bottom Utility Row: Text only, NO icons -->
+    <footer class="mobile-actions-bar">
+      <button id="btn-blackout" class="mobile-action-btn">Blackout</button>
+      <button id="btn-reset-timer" class="mobile-action-btn">Reset Timer</button>
+    </footer>
+  </div>
+
+  <!-- Local Vendor Scripts with CDN Fallbacks -->
+  <script src="vendor/peerjs.min.js"></script>
+  <script>if (!window.Peer) document.write('<script src="https://cdnjs.cloudflare.com/ajax/libs/peerjs/1.5.4/peerjs.min.js"><\/script>');</script>
+
+  <script src="js/remote.js"></script>
+</body>
+</html>

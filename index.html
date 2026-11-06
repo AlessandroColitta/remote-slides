@@ -1,0 +1,109 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Remote Slides</title>
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+
+  <!-- PC Setup and Dashboard View -->
+  <main class="app-container">
+    <header class="header">
+      <div>
+        <span class="brand-title">Remote Slides</span>
+        <span class="brand-subtitle">PowerPoint deck viewer with smartphone clicker</span>
+      </div>
+      <div id="connection-status" class="connection-status">Waiting for smartphone...</div>
+    </header>
+
+    <div class="grid-layout">
+      <!-- Card 1: PowerPoint Deck Loader -->
+      <section class="card">
+        <h2 class="card-title">Presentation Deck</h2>
+        <p class="card-desc">Load any Microsoft PowerPoint (.pptx) presentation or PDF slide deck.</p>
+
+        <div id="dropzone" class="dropzone">
+          <input type="file" id="file-input" accept=".pptx,.pdf,application/vnd.openxmlformats-officedocument.presentationml.presentation,application/pdf" style="display: none;">
+          <div class="dropzone-label">Select PowerPoint presentation (.pptx)</div>
+          <div class="dropzone-sub">or drag and drop your file here (supports .pptx and .pdf)</div>
+        </div>
+
+        <div id="file-info" class="file-info" style="display: none;">
+          <div class="file-info-row">
+            <span class="file-info-name" id="file-name">presentation.pptx</span>
+            <span class="file-info-pages" id="file-pages">0 slides</span>
+          </div>
+        </div>
+
+        <div class="actions-row">
+          <button id="btn-start-presentation" class="primary" disabled>Enter Presentation Mode</button>
+          <button id="btn-demo">Try Demo Deck</button>
+        </div>
+      </section>
+
+      <!-- Card 2: Smartphone QR Connection -->
+      <section class="card">
+        <h2 class="card-title">Smartphone Connection</h2>
+        <p class="card-desc">Scan with your smartphone camera to open the remote control in Chrome.</p>
+
+        <div class="qr-container">
+          <div id="qr-box" class="qr-box"></div>
+          <div id="room-code-tag" class="room-code-tag">CONNECTING...</div>
+          <div id="mobile-status-tag" class="connection-status">Waiting for connection</div>
+        </div>
+      </section>
+    </div>
+
+    <footer class="footer-instructions">
+      <span>PC Controls: Next (Right Arrow / Space) • Previous (Left Arrow) • Fullscreen (F) • Blackout (B) • Exit (Escape)</span>
+      <span>Native .pptx reading • No installation • Chrome &amp; Edge</span>
+    </footer>
+  </main>
+
+  <!-- Presentation Mode (Fullscreen Deck View) -->
+  <div id="presentation-view">
+    <canvas id="slide-canvas"></canvas>
+    
+    <!-- Blank/Blackout Layer -->
+    <div id="blackout-overlay"></div>
+
+    <!-- Floating Minimal Hover Bar -->
+    <div id="presentation-bar" class="presentation-bar">
+      <button id="btn-bar-prev">Previous</button>
+      <span id="presentation-counter" class="presentation-counter">1 / 1</span>
+      <button id="btn-bar-next">Next</button>
+      <button id="btn-bar-exit">Exit</button>
+    </div>
+  </div>
+
+  <!-- Local Vendor Scripts with CDN Fallbacks -->
+  <!-- 1. JSZip (required by PowerPoint engine) -->
+  <script src="vendor/jszip.min.js"></script>
+  <script>if (!window.JSZip) document.write('<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"><\/script>');</script>
+
+  <!-- 2. Chart.js (required by PowerPoint charts engine) -->
+  <script src="vendor/chart.umd.min.js"></script>
+  <script>if (!window.Chart) document.write('<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"><\/script>');</script>
+
+  <!-- 3. PptxViewJS (native client-side PowerPoint viewer) -->
+  <script src="vendor/PptxViewJS.min.js"></script>
+  <script>if (!window.PptxViewJS) document.write('<script src="https://cdn.jsdelivr.net/npm/pptxviewjs@1.1.9/dist/PptxViewJS.min.js"><\/script>');</script>
+
+  <!-- 4. PeerJS (WebRTC direct smartphone pairing) -->
+  <script src="vendor/peerjs.min.js"></script>
+  <script>if (!window.Peer) document.write('<script src="https://cdnjs.cloudflare.com/ajax/libs/peerjs/1.5.4/peerjs.min.js"><\/script>');</script>
+
+  <!-- 5. PDF.js (secondary PDF deck support) -->
+  <script src="vendor/pdf.min.js"></script>
+  <script>if (!window.pdfjsLib) document.write('<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"><\/script>');</script>
+
+  <!-- 6. QRCode (instant QR code generator) -->
+  <script src="vendor/qrcode.min.js"></script>
+  <script>if (!window.QRCode) document.write('<script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"><\/script>');</script>
+
+  <!-- Main Presenter Application -->
+  <script src="js/presenter.js"></script>
+</body>
+</html>

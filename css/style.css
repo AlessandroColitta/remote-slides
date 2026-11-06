@@ -1,0 +1,546 @@
+/* Minimalist Presentation & Remote Control Stylesheet */
+:root {
+  --bg-primary: #0a0a0c;
+  --bg-surface: #141418;
+  --bg-surface-hover: #1c1c22;
+  --border-subtle: #27272a;
+  --border-focus: #52525b;
+  --text-primary: #f4f4f5;
+  --text-secondary: #a1a1aa;
+  --text-muted: #71717a;
+  --accent: #ffffff;
+  --accent-text: #0a0a0c;
+  --danger: #ef4444;
+  --font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+}
+
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  font-family: var(--font-family);
+  background-color: var(--bg-primary);
+  color: var(--text-primary);
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+  min-height: 100vh;
+}
+
+/* Common Minimalist Elements */
+button {
+  font-family: inherit;
+  cursor: pointer;
+  border: 1px solid var(--border-subtle);
+  background: var(--bg-surface);
+  color: var(--text-primary);
+  border-radius: 6px;
+  padding: 10px 16px;
+  font-size: 14px;
+  font-weight: 500;
+  transition: all 0.15s ease;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+button:hover:not(:disabled) {
+  background: var(--bg-surface-hover);
+  border-color: var(--border-focus);
+}
+
+button:active:not(:disabled) {
+  transform: scale(0.98);
+}
+
+button:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+button.primary {
+  background: var(--accent);
+  color: var(--accent-text);
+  border-color: var(--accent);
+}
+
+button.primary:hover:not(:disabled) {
+  background: #e4e4e7;
+  border-color: #e4e4e7;
+}
+
+/* =========================================
+   PC PRESENTER VIEW
+   ========================================= */
+
+.app-container {
+  max-width: 1100px;
+  margin: 0 auto;
+  padding: 40px 24px;
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+
+.header {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  padding-bottom: 24px;
+  border-bottom: 1px solid var(--border-subtle);
+  margin-bottom: 36px;
+}
+
+.brand-title {
+  font-size: 20px;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  color: var(--text-primary);
+}
+
+.brand-subtitle {
+  font-size: 13px;
+  color: var(--text-muted);
+  margin-left: 12px;
+}
+
+.connection-status {
+  font-size: 13px;
+  color: var(--text-muted);
+}
+
+.connection-status.connected {
+  color: #34d399;
+}
+
+.grid-layout {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 32px;
+  margin-bottom: 40px;
+}
+
+@media (max-width: 820px) {
+  .grid-layout {
+    grid-template-columns: 1fr;
+  }
+}
+
+.card {
+  background: var(--bg-surface);
+  border: 1px solid var(--border-subtle);
+  border-radius: 10px;
+  padding: 28px;
+  display: flex;
+  flex-direction: column;
+}
+
+.card-title {
+  font-size: 15px;
+  font-weight: 600;
+  margin-bottom: 8px;
+  letter-spacing: -0.01em;
+}
+
+.card-desc {
+  font-size: 13px;
+  color: var(--text-secondary);
+  margin-bottom: 24px;
+}
+
+/* Drop Zone */
+.dropzone {
+  border: 1px dashed var(--border-focus);
+  border-radius: 8px;
+  padding: 40px 20px;
+  text-align: center;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  background: rgba(255, 255, 255, 0.01);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  min-height: 180px;
+}
+
+.dropzone:hover,
+.dropzone.dragover {
+  border-color: var(--text-primary);
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.dropzone-label {
+  font-size: 14px;
+  font-weight: 500;
+  margin-bottom: 6px;
+}
+
+.dropzone-sub {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.file-info {
+  margin-top: 18px;
+  padding: 14px;
+  background: var(--bg-primary);
+  border: 1px solid var(--border-subtle);
+  border-radius: 6px;
+  font-size: 13px;
+}
+
+.file-info-row {
+  display: flex;
+  justify-content: space-between;
+  margin-bottom: 4px;
+}
+
+.file-info-row:last-child {
+  margin-bottom: 0;
+}
+
+.file-info-name {
+  font-weight: 500;
+  color: var(--text-primary);
+  word-break: break-all;
+}
+
+.file-info-pages {
+  color: var(--text-secondary);
+}
+
+.actions-row {
+  display: flex;
+  gap: 10px;
+  margin-top: 20px;
+}
+
+/* QR Code Section */
+.qr-container {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+}
+
+.qr-box {
+  background: #ffffff;
+  padding: 14px;
+  border-radius: 8px;
+  display: inline-block;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.5);
+  margin-bottom: 18px;
+}
+
+.qr-box canvas,
+.qr-box img {
+  display: block;
+}
+
+.room-code-tag {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 14px;
+  letter-spacing: 0.08em;
+  color: var(--text-primary);
+  background: var(--bg-primary);
+  padding: 6px 14px;
+  border-radius: 4px;
+  border: 1px solid var(--border-subtle);
+  margin-bottom: 12px;
+}
+
+.footer-instructions {
+  margin-top: auto;
+  padding-top: 24px;
+  border-top: 1px solid var(--border-subtle);
+  font-size: 12px;
+  color: var(--text-muted);
+  display: flex;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+/* =========================================
+   FULLSCREEN PRESENTATION VIEW
+   ========================================= */
+
+#presentation-view {
+  display: none;
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100vw;
+  height: 100vh;
+  background: #000000;
+  z-index: 9999;
+  justify-content: center;
+  align-items: center;
+  overflow: hidden;
+}
+
+#presentation-view.active {
+  display: flex;
+}
+
+#slide-canvas {
+  max-width: 100vw;
+  max-height: 100vh;
+  object-fit: contain;
+  display: block;
+}
+
+/* Blackout Screen Layer */
+#blackout-overlay {
+  display: none;
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background: #000000;
+  z-index: 10000;
+}
+
+#blackout-overlay.active {
+  display: block;
+}
+
+/* Floating Presentation Controls */
+.presentation-bar {
+  position: absolute;
+  bottom: 24px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: rgba(18, 18, 22, 0.9);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  padding: 8px 16px;
+  border-radius: 30px;
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  transition: opacity 0.3s ease, transform 0.3s ease;
+  z-index: 10001;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.presentation-bar.visible {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.presentation-counter {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-secondary);
+  letter-spacing: 0.02em;
+}
+
+.presentation-bar button {
+  padding: 6px 12px;
+  font-size: 12px;
+  border-radius: 20px;
+  background: transparent;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+}
+
+.presentation-bar button:hover {
+  background: rgba(255, 255, 255, 0.1);
+}
+
+/* =========================================
+   SMARTPHONE REMOTE CONTROLLER VIEW
+   ========================================= */
+
+.mobile-app {
+  width: 100%;
+  height: 100dvh;
+  display: flex;
+  flex-direction: column;
+  background: #000000;
+  color: #ffffff;
+  padding: 16px 20px 24px;
+  overflow: hidden;
+  user-select: none;
+  -webkit-user-select: none;
+  touch-action: manipulation;
+}
+
+/* Top bar: minimal text status & timer + ONLY 1 icon for exit */
+.mobile-top-bar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding-bottom: 14px;
+  border-bottom: 1px solid #1f1f23;
+  flex-shrink: 0;
+}
+
+.mobile-status-group {
+  display: flex;
+  flex-direction: column;
+}
+
+.mobile-status-text {
+  font-size: 12px;
+  letter-spacing: 0.04em;
+  color: #71717a;
+  text-transform: uppercase;
+  font-weight: 500;
+}
+
+.mobile-status-text.connected {
+  color: #34d399;
+}
+
+.mobile-timer {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 13px;
+  color: #a1a1aa;
+  margin-top: 2px;
+}
+
+/* Exit Presentation button with minimalist SVG icon */
+.mobile-exit-btn {
+  background: #141418;
+  border: 1px solid #27272a;
+  color: #e4e4e7;
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  transition: all 0.15s ease;
+}
+
+.mobile-exit-btn:active {
+  background: #27272a;
+  transform: scale(0.92);
+}
+
+/* Slide Counter in Center */
+.mobile-slide-info {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 24px 0 16px;
+  flex-shrink: 0;
+}
+
+.mobile-slide-num {
+  font-size: 56px;
+  font-weight: 700;
+  letter-spacing: -0.04em;
+  line-height: 1;
+}
+
+.mobile-slide-total {
+  font-size: 14px;
+  color: #71717a;
+  margin-top: 6px;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+/* Progress bar */
+.mobile-progress-track {
+  width: 100%;
+  height: 3px;
+  background: #1f1f23;
+  border-radius: 2px;
+  margin: 12px 0 20px;
+  overflow: hidden;
+  flex-shrink: 0;
+}
+
+.mobile-progress-fill {
+  height: 100%;
+  background: #ffffff;
+  width: 0%;
+  transition: width 0.2s ease;
+}
+
+/* Primary Slide Control Touch Zones (ONLY with Next/Prev icons) */
+.mobile-controls-area {
+  display: flex;
+  flex-direction: row;
+  gap: 14px;
+  flex: 1;
+  min-height: 0;
+}
+
+.slide-nav-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 14px;
+  transition: all 0.12s ease;
+  outline: none;
+  border: 1px solid #27272a;
+}
+
+.slide-nav-btn:active {
+  transform: scale(0.96);
+}
+
+/* Previous Slide Button */
+.slide-nav-btn.prev {
+  flex: 1;
+  background: #141418;
+  color: #a1a1aa;
+}
+
+.slide-nav-btn.prev:active {
+  background: #22222a;
+  color: #ffffff;
+}
+
+/* Next Slide Button (Dominant primary touch target) */
+.slide-nav-btn.next {
+  flex: 2;
+  background: #ffffff;
+  color: #000000;
+  border-color: #ffffff;
+}
+
+.slide-nav-btn.next:active {
+  background: #e4e4e7;
+}
+
+/* Bottom Utility Actions (Text only, NO icons) */
+.mobile-actions-bar {
+  display: flex;
+  gap: 12px;
+  margin-top: 16px;
+  flex-shrink: 0;
+}
+
+.mobile-action-btn {
+  flex: 1;
+  padding: 12px 8px;
+  font-size: 13px;
+  background: #141418;
+  border: 1px solid #27272a;
+  color: #a1a1aa;
+  border-radius: 8px;
+  text-align: center;
+}
+
+.mobile-action-btn:hover {
+  color: #ffffff;
+}
+
+.mobile-action-btn.active {
+  background: #27272a;
+  color: #ffffff;
+  border-color: #52525b;
+}
