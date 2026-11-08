@@ -484,24 +484,24 @@
         timeout: 180000
       });
 
+      // Prepare ArrayBuffer if passed a File or Blob
+      let buf = fileOrBuffer;
+      if (typeof fileOrBuffer === 'string') {
+        const res = await fetch(fileOrBuffer);
+        buf = await res.arrayBuffer();
+      } else if (typeof File !== 'undefined' && fileOrBuffer instanceof File) {
+        buf = await fileOrBuffer.arrayBuffer();
+      } else if (typeof Blob !== 'undefined' && fileOrBuffer instanceof Blob) {
+        buf = await fileOrBuffer.arrayBuffer();
+      }
+
       // Parse zip structure for embedded videos
       if (window.JSZip) {
-        if (typeof fileOrBuffer === 'string') {
-          const res = await fetch(fileOrBuffer);
-          const buf = await res.arrayBuffer();
-          currentZip = await JSZip.loadAsync(buf);
-          await pptxViewer.loadFromUrl(fileOrBuffer);
-        } else {
-          currentZip = await JSZip.loadAsync(fileOrBuffer);
-          await pptxViewer.loadFile(fileOrBuffer);
-        }
+        currentZip = await JSZip.loadAsync(buf);
+        await pptxViewer.loadFile(buf);
         await scanPptxVideos(currentZip);
       } else {
-        if (typeof fileOrBuffer === 'string') {
-          await pptxViewer.loadFromUrl(fileOrBuffer);
-        } else {
-          await pptxViewer.loadFile(fileOrBuffer);
-        }
+        await pptxViewer.loadFile(buf);
       }
 
       engineType = 'pptx';
@@ -523,13 +523,20 @@
     }
   }
 
-  async function loadPdf(arrayBuffer, fileName) {
+  async function loadPdf(fileOrBuffer, fileName) {
     if (!window.pdfjsLib) {
       alert('PDF library not loaded');
       return;
     }
 
     try {
+      let arrayBuffer = fileOrBuffer;
+      if (typeof File !== 'undefined' && fileOrBuffer instanceof File) {
+        arrayBuffer = await fileOrBuffer.arrayBuffer();
+      } else if (typeof Blob !== 'undefined' && fileOrBuffer instanceof Blob) {
+        arrayBuffer = await fileOrBuffer.arrayBuffer();
+      }
+
       const loadingTask = pdfjsLib.getDocument({ data: arrayBuffer });
       pdfDoc = await loadingTask.promise;
       engineType = 'pdf';
@@ -553,16 +560,26 @@
     }
   }
 
-  function handleLoadedFile(file) {
+  async function handleLoadedFile(file) {
     const name = file.name.toLowerCase();
-    if (name.endsWith('.pptx')) {
-      loadPptx(file, file.name);
-    } else if (name.endsWith('.pdf')) {
-      const reader = new FileReader();
-      reader.onload = (e) => loadPdf(e.target.result, file.name);
-      reader.readAsArrayBuffer(file);
-    } else {
-      alert('Please select a PowerPoint (.pptx) or PDF (.pdf) file.');
+    fileNameEl.textContent = file.name;
+    filePagesEl.textContent = 'Loading presentation...';
+    fileInfo.style.display = 'block';
+    btnStartPresentation.disabled = true;
+
+    try {
+      const buffer = await file.arrayBuffer();
+      if (name.endsWith('.pptx')) {
+        await loadPptx(buffer, file.name);
+      } else if (name.endsWith('.pdf')) {
+        await loadPdf(buffer, file.name);
+      } else {
+        fileInfo.style.display = 'none';
+        alert('Please select a PowerPoint (.pptx) or PDF (.pdf) file.');
+      }
+    } catch (err) {
+      console.error('Error reading presentation file:', err);
+      alert('Error reading presentation file: ' + err.message);
     }
   }
 
