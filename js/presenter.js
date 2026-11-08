@@ -1,6 +1,7 @@
 /**
  * Minimalist Remote Slides - Presenter Engine (PC View)
  * Supports Microsoft PowerPoint (.pptx) & PDF files
+ * Embedded Video Reproduction & Smartphone Gyroscope Laser Pointer
  * Works in Google Chrome & Microsoft Edge
  */
 
@@ -17,6 +18,20 @@
   let pendingPage = null;
   let isPresenting = false;
   let isBlackout = false;
+
+  // Video Reproduction State
+  let currentZip = null;
+  let slideVideos = {}; // 0-based slideIndex -> [{ targetPath, xPct, yPct, wPct, hPct }]
+  let currentVideoEl = null;
+  let currentVideoBlobUrl = null;
+
+  // Laser Pointer State
+  let isLaserActive = false;
+  let laserTargetX = 0.5;
+  let laserTargetY = 0.5;
+  let laserCurrentX = 0.5;
+  let laserCurrentY = 0.5;
+  let laserAnimId = null;
 
   // WebRTC PeerJS State
   let peer = null;
@@ -40,6 +55,8 @@
   const presentationView = document.getElementById('presentation-view');
   const slideCanvas = document.getElementById('slide-canvas');
   const canvasCtx = slideCanvas.getContext('2d');
+  const videoLayer = document.getElementById('presentation-video-layer');
+  const laserPointerEl = document.getElementById('laser-pointer');
   const blackoutOverlay = document.getElementById('blackout-overlay');
   const presentationBar = document.getElementById('presentation-bar');
   const presentationCounter = document.getElementById('presentation-counter');
@@ -186,13 +203,21 @@
   }
 
   function sendSync(targetConn) {
+    const hasVid = !!currentVideoEl;
+    const isPlaying = hasVid && !currentVideoEl.paused && !currentVideoEl.ended;
+    const isEnded = hasVid && currentVideoEl.ended;
+
     const payload = {
       action: 'sync',
       current: currentPage,
       total: totalPages,
       isPresenting: isPresenting,
-      isBlackout: isBlackout
+      isBlackout: isBlackout,
+      hasVideo: hasVid,
+      isVideoPlaying: isPlaying,
+      isVideoEnded: isEnded
     };
+
     if (targetConn && targetConn.open) {
       targetConn.send(payload);
     } else {
@@ -221,10 +246,209 @@
       case 'exit':
         exitPresentation();
         break;
+      case 'pointer':
+        setLaserState(data.active, data.x, data.y);
+        break;
+      case 'video_toggle':
+        toggleVideoPlayback();
+        break;
+      case 'video_play':
+        if (currentVideoEl && currentVideoEl.paused) {
+          currentVideoEl.play().catch(() => {});
+          sendSync();
+        }
+        break;
+      case 'video_pause':
+        if (currentVideoEl && !currentVideoEl.paused) {
+          currentVideoEl.pause();
+          sendSync();
+        }
+        break;
       case 'request_sync':
         sendSync();
         break;
     }
+  }
+
+  // ==========================================
+  // Laser Pointer Engine
+  // ==========================================
+
+  function renderLaserLoop() {
+    if (!isLaserActive) return;
+    laserCurrentX += (laserTargetX - laserCurrentX) * 0.4;
+    laserCurrentY += (laserTargetY - laserCurrentY) * 0.4;
+
+    const w = window.innerWidth;
+    const h = window.innerHeight;
+    laserPointerEl.style.left = Math.round(laserCurrentX * w) + 'px';
+    laserPointerEl.style.top = Math.round(laserCurrentY * h) + 'px';
+
+    laserAnimId = requestAnimationFrame(renderLaserLoop);
+  }
+
+  function setLaserState(active, normX, normY) {
+    isLaserActive = !!active;
+    if (isLaserActive) {
+      laserPointerEl.classList.add('active');
+      if (typeof normX === 'number') laserTargetX = normX;
+      if (typeof normY === 'number') laserTargetY = normY;
+      cancelAnimationFrame(laserAnimId);
+      laserAnimId = requestAnimationFrame(renderLaserLoop);
+    } else {
+      laserPointerEl.classList.remove('active');
+      cancelAnimationFrame(laserAnimId);
+    }
+  }
+
+  // ==========================================
+  // Video Reproduction Engine
+  // ==========================================
+
+  async function scanPptxVideos(zip) {
+    slideVideos = {};
+    try {
+      const presXmlStr = await zip.file('ppt/presentation.xml')?.async('text');
+      if (!presXmlStr) return;
+      const parser = new DOMParser();
+      const presDoc = parser.parseFromString(presXmlStr, 'application/xml');
+      const sldSz = presDoc.querySelector('sldSz, p\\:sldSz');
+      const sldW = parseInt(sldSz?.getAttribute('cx')) || 12192000;
+      const sldH = parseInt(sldSz?.getAttribute('cy')) || 6858000;
+
+      for (let i = 1; i <= 250; i++) {
+        const slidePath = `ppt/slides/slide${i}.xml`;
+        const relsPath = `ppt/slides/_rels/slide${i}.xml.rels`;
+        const slideFile = zip.file(slidePath);
+        const relsFile = zip.file(relsPath);
+        if (!slideFile || !relsFile) continue;
+
+        const relsXml = await relsFile.async('text');
+        const relsDoc = parser.parseFromString(relsXml, 'application/xml');
+        const vidMap = {};
+
+        relsDoc.querySelectorAll('Relationship').forEach(rel => {
+          const type = rel.getAttribute('Type') || '';
+          if (type.includes('video') || type.includes('media')) {
+            const id = rel.getAttribute('Id');
+            const target = rel.getAttribute('Target').replace('../', 'ppt/');
+            vidMap[id] = target;
+          }
+        });
+
+        if (Object.keys(vidMap).length === 0) continue;
+
+        const slideXml = await slideFile.async('text');
+        const slideDoc = parser.parseFromString(slideXml, 'application/xml');
+        const pics = slideDoc.querySelectorAll('pic, p\\:pic');
+        const vids = [];
+
+        pics.forEach(pic => {
+          const vidLink = pic.querySelector('videoFile, a\\:videoFile');
+          const mediaEmbed = pic.querySelector('media, p14\\:media');
+          const rId = vidLink?.getAttribute('r:link') || mediaEmbed?.getAttribute('r:embed');
+
+          if (rId && vidMap[rId]) {
+            const off = pic.querySelector('off, a\\:off');
+            const ext = pic.querySelector('ext, a\\:ext');
+            if (off && ext) {
+              const x = parseInt(off.getAttribute('x')) || 0;
+              const y = parseInt(off.getAttribute('y')) || 0;
+              const cx = parseInt(ext.getAttribute('cx')) || 0;
+              const cy = parseInt(ext.getAttribute('cy')) || 0;
+
+              vids.push({
+                targetPath: vidMap[rId],
+                xPct: x / sldW,
+                yPct: y / sldH,
+                wPct: cx / sldW,
+                hPct: cy / sldH
+              });
+            }
+          }
+        });
+
+        if (vids.length > 0) {
+          slideVideos[i - 1] = vids;
+        }
+      }
+    } catch (err) {
+      console.warn('Video scanner notice:', err);
+    }
+  }
+
+  async function mountSlideVideos() {
+    // Teardown existing video
+    if (currentVideoEl) {
+      currentVideoEl.pause();
+      currentVideoEl.remove();
+      currentVideoEl = null;
+    }
+    if (currentVideoBlobUrl) {
+      URL.revokeObjectURL(currentVideoBlobUrl);
+      currentVideoBlobUrl = null;
+    }
+
+    const slideIndex = currentPage - 1;
+    const vids = slideVideos[slideIndex];
+    if (vids && vids.length > 0 && currentZip) {
+      const vidInfo = vids[0];
+      const vidFile = currentZip.file(vidInfo.targetPath);
+      if (vidFile) {
+        try {
+          const blob = await vidFile.async('blob');
+          currentVideoBlobUrl = URL.createObjectURL(blob);
+          currentVideoEl = document.createElement('video');
+          currentVideoEl.src = currentVideoBlobUrl;
+          currentVideoEl.playsInline = true;
+          currentVideoEl.className = 'presentation-video';
+          currentVideoEl.preload = 'auto';
+
+          positionVideoElement(currentVideoEl, vidInfo);
+
+          currentVideoEl.addEventListener('play', () => sendSync());
+          currentVideoEl.addEventListener('pause', () => sendSync());
+          currentVideoEl.addEventListener('ended', () => sendSync());
+          currentVideoEl.addEventListener('click', (e) => {
+            e.stopPropagation();
+            toggleVideoPlayback();
+          });
+
+          videoLayer.appendChild(currentVideoEl);
+        } catch (e) {
+          console.warn('Could not mount video:', e);
+        }
+      }
+    }
+
+    sendSync();
+  }
+
+  function positionVideoElement(videoEl, vidInfo) {
+    if (!videoEl || !vidInfo) return;
+    const canvasRect = slideCanvas.getBoundingClientRect();
+    const presRect = presentationView.getBoundingClientRect();
+
+    const left = (canvasRect.left - presRect.left) + vidInfo.xPct * canvasRect.width;
+    const top = (canvasRect.top - presRect.top) + vidInfo.yPct * canvasRect.height;
+    const width = vidInfo.wPct * canvasRect.width;
+    const height = vidInfo.hPct * canvasRect.height;
+
+    videoEl.style.left = Math.round(left) + 'px';
+    videoEl.style.top = Math.round(top) + 'px';
+    videoEl.style.width = Math.round(width) + 'px';
+    videoEl.style.height = Math.round(height) + 'px';
+  }
+
+  function toggleVideoPlayback() {
+    if (!currentVideoEl) return;
+    if (currentVideoEl.paused || currentVideoEl.ended) {
+      if (currentVideoEl.ended) currentVideoEl.currentTime = 0;
+      currentVideoEl.play().catch(e => console.warn('Video play blocked:', e));
+    } else {
+      currentVideoEl.pause();
+    }
+    sendSync();
   }
 
   // ==========================================
@@ -259,11 +483,25 @@
         maxFileSize: 1024 * 1024 * 1024,
         timeout: 180000
       });
-      
-      if (typeof fileOrBuffer === 'string') {
-        await pptxViewer.loadFromUrl(fileOrBuffer);
+
+      // Parse zip structure for embedded videos
+      if (window.JSZip) {
+        if (typeof fileOrBuffer === 'string') {
+          const res = await fetch(fileOrBuffer);
+          const buf = await res.arrayBuffer();
+          currentZip = await JSZip.loadAsync(buf);
+          await pptxViewer.loadFromUrl(fileOrBuffer);
+        } else {
+          currentZip = await JSZip.loadAsync(fileOrBuffer);
+          await pptxViewer.loadFile(fileOrBuffer);
+        }
+        await scanPptxVideos(currentZip);
       } else {
-        await pptxViewer.loadFile(fileOrBuffer);
+        if (typeof fileOrBuffer === 'string') {
+          await pptxViewer.loadFromUrl(fileOrBuffer);
+        } else {
+          await pptxViewer.loadFile(fileOrBuffer);
+        }
       }
 
       engineType = 'pptx';
@@ -296,6 +534,8 @@
       pdfDoc = await loadingTask.promise;
       engineType = 'pdf';
       pptxViewer = null;
+      currentZip = null;
+      slideVideos = {};
       totalPages = pdfDoc.numPages;
       currentPage = 1;
 
@@ -343,7 +583,6 @@
         slideCanvas.style.width = width + 'px';
         slideCanvas.style.height = height + 'px';
 
-        // PptxViewJS uses 0-based slide indexing
         await pptxViewer.render(slideCanvas, { slideIndex: currentPage - 1 });
       } catch (err) {
         console.error('PPTX render error:', err);
@@ -379,6 +618,9 @@
       }
     }
 
+    // Mount any videos embedded on this slide
+    await mountSlideVideos();
+
     isRendering = false;
     presentationCounter.textContent = currentPage + ' / ' + totalPages;
     sendSync();
@@ -394,7 +636,6 @@
   function loadSampleDeck() {
     btnDemo.disabled = true;
     btnDemo.textContent = 'Loading...';
-    // Load sample-presentation.pptx
     loadPptx('sample-presentation.pptx', 'sample-presentation.pptx')
       .then(() => {
         btnDemo.textContent = 'PPTX Loaded';
@@ -434,7 +675,6 @@
     isPresenting = true;
     presentationView.classList.add('active');
 
-    // Request browser fullscreen (requires user gesture on PC)
     if (document.documentElement.requestFullscreen) {
       document.documentElement.requestFullscreen().catch(() => {});
     }
@@ -452,6 +692,7 @@
       document.exitFullscreen().catch(() => {});
     }
 
+    setLaserState(false);
     renderCurrentSlide();
     sendSync();
   }
@@ -509,10 +750,20 @@
     switch (e.code) {
       case 'ArrowRight':
       case 'ArrowDown':
-      case 'Space':
       case 'PageDown':
       case 'Enter':
         nextPage();
+        break;
+      case 'Space':
+        // If a video is present, Space toggles video play/pause; otherwise advances slide
+        if (currentVideoEl) {
+          toggleVideoPlayback();
+        } else {
+          nextPage();
+        }
+        break;
+      case 'KeyV':
+        toggleVideoPlayback();
         break;
       case 'ArrowLeft':
       case 'ArrowUp':
