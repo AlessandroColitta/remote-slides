@@ -254,7 +254,11 @@
     }
 
     try {
-      pptxViewer = new PptxViewJS.PPTXViewer({ canvas: slideCanvas });
+      pptxViewer = new PptxViewJS.PPTXViewer({
+        canvas: slideCanvas,
+        maxFileSize: 1024 * 1024 * 1024,
+        timeout: 180000
+      });
       
       if (typeof fileOrBuffer === 'string') {
         await pptxViewer.loadFromUrl(fileOrBuffer);
