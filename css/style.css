@@ -302,7 +302,7 @@ button.primary:hover:not(:disabled) {
   width: 100%;
   height: 100%;
   background: #000000;
-  z-index: 10000;
+  z-index: 10010;
 }
 
 #blackout-overlay.active {
@@ -328,6 +328,8 @@ button.primary:hover:not(:disabled) {
   background: #000000;
   object-fit: contain;
   border-radius: 4px;
+  cursor: pointer;
+  overflow: hidden;
 }
 
 /* Glowing Laser Pointer */
@@ -341,7 +343,7 @@ button.primary:hover:not(:disabled) {
   box-shadow: 0 0 10px 3px #ff2a2a, 0 0 22px 6px rgba(255, 42, 42, 0.65), 0 0 2px 2px #ffffff;
   pointer-events: none;
   transform: translate(-50%, -50%);
-  z-index: 10005;
+  z-index: 10015;
   transition: opacity 0.15s ease;
 }
 
@@ -365,7 +367,7 @@ button.primary:hover:not(:disabled) {
   align-items: center;
   gap: 16px;
   transition: opacity 0.3s ease, transform 0.3s ease;
-  z-index: 10001;
+  z-index: 10020;
   opacity: 0;
   pointer-events: none;
 }

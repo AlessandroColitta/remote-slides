@@ -250,9 +250,15 @@
         setLaserState(data.active, data.x, data.y);
         break;
       case 'video_toggle':
+        if (!isPresenting) {
+          enterPresentation();
+        }
         toggleVideoPlayback();
         break;
       case 'video_play':
+        if (!isPresenting) {
+          enterPresentation();
+        }
         if (currentVideoEl && currentVideoEl.paused) {
           currentVideoEl.play().catch(() => {});
           sendSync();
@@ -305,6 +311,8 @@
   // Video Reproduction Engine
   // ==========================================
 
+  let currentVideoInfo = null;
+
   async function scanPptxVideos(zip) {
     slideVideos = {};
     try {
@@ -349,22 +357,54 @@
           const rId = vidLink?.getAttribute('r:link') || mediaEmbed?.getAttribute('r:embed');
 
           if (rId && vidMap[rId]) {
-            const off = pic.querySelector('off, a\\:off');
-            const ext = pic.querySelector('ext, a\\:ext');
-            if (off && ext) {
-              const x = parseInt(off.getAttribute('x')) || 0;
-              const y = parseInt(off.getAttribute('y')) || 0;
-              const cx = parseInt(ext.getAttribute('cx')) || 0;
-              const cy = parseInt(ext.getAttribute('cy')) || 0;
+            // Locate xfrm (transform) specifically inside shape properties
+            const xfrm = pic.querySelector('xfrm, a\\:xfrm, p\\:xfrm');
+            const off = xfrm ? xfrm.querySelector('off, a\\:off') : pic.querySelector('off, a\\:off');
 
-              vids.push({
-                targetPath: vidMap[rId],
-                xPct: x / sldW,
-                yPct: y / sldH,
-                wPct: cx / sldW,
-                hPct: cy / sldH
-              });
+            // Find ext element that has cx/cy attributes (avoiding a:extLst/a:ext metadata)
+            let ext = null;
+            if (xfrm) {
+              ext = xfrm.querySelector('ext, a\\:ext');
             }
+            if (!ext || !ext.getAttribute('cx')) {
+              const allExts = pic.querySelectorAll('ext, a\\:ext');
+              for (const e of allExts) {
+                if (e.getAttribute('cx')) {
+                  ext = e;
+                  break;
+                }
+              }
+            }
+
+            const geom = pic.querySelector('prstGeom, a\\:prstGeom');
+            const isEllipse = geom?.getAttribute('prst') === 'ellipse';
+
+            const x = parseInt(off?.getAttribute('x')) || 0;
+            const y = parseInt(off?.getAttribute('y')) || 0;
+            const cx = parseInt(ext?.getAttribute('cx')) || 0;
+            const cy = parseInt(ext?.getAttribute('cy')) || 0;
+
+            let xPct = x / sldW;
+            let yPct = y / sldH;
+            let wPct = cx / sldW;
+            let hPct = cy / sldH;
+
+            // Fallback to full slide if dimensions are missing or 0
+            if (wPct <= 0 || hPct <= 0) {
+              xPct = 0;
+              yPct = 0;
+              wPct = 1.0;
+              hPct = 1.0;
+            }
+
+            vids.push({
+              targetPath: vidMap[rId],
+              xPct,
+              yPct,
+              wPct,
+              hPct,
+              isEllipse
+            });
           }
         });
 
@@ -388,21 +428,31 @@
       URL.revokeObjectURL(currentVideoBlobUrl);
       currentVideoBlobUrl = null;
     }
+    currentVideoInfo = null;
 
     const slideIndex = currentPage - 1;
     const vids = slideVideos[slideIndex];
     if (vids && vids.length > 0 && currentZip) {
-      const vidInfo = vids[0];
+      // Prefer modern playable formats (mp4, webm) over legacy avi
+      const vidInfo = vids.find(v => !v.targetPath.toLowerCase().endsWith('.avi')) || vids[0];
       const vidFile = currentZip.file(vidInfo.targetPath);
       if (vidFile) {
         try {
-          const blob = await vidFile.async('blob');
+          const arrayBuffer = await vidFile.async('arraybuffer');
+          const targetLower = vidInfo.targetPath.toLowerCase();
+          let mime = 'video/mp4';
+          if (targetLower.endsWith('.webm')) mime = 'video/webm';
+          else if (targetLower.endsWith('.ogv') || targetLower.endsWith('.ogg')) mime = 'video/ogg';
+          else if (targetLower.endsWith('.mov')) mime = 'video/quicktime';
+
+          const blob = new Blob([arrayBuffer], { type: mime });
           currentVideoBlobUrl = URL.createObjectURL(blob);
           currentVideoEl = document.createElement('video');
           currentVideoEl.src = currentVideoBlobUrl;
           currentVideoEl.playsInline = true;
           currentVideoEl.className = 'presentation-video';
           currentVideoEl.preload = 'auto';
+          currentVideoInfo = vidInfo;
 
           positionVideoElement(currentVideoEl, vidInfo);
 
@@ -429,6 +479,8 @@
     const canvasRect = slideCanvas.getBoundingClientRect();
     const presRect = presentationView.getBoundingClientRect();
 
+    if (canvasRect.width === 0 || canvasRect.height === 0) return;
+
     const left = (canvasRect.left - presRect.left) + vidInfo.xPct * canvasRect.width;
     const top = (canvasRect.top - presRect.top) + vidInfo.yPct * canvasRect.height;
     const width = vidInfo.wPct * canvasRect.width;
@@ -438,10 +490,27 @@
     videoEl.style.top = Math.round(top) + 'px';
     videoEl.style.width = Math.round(width) + 'px';
     videoEl.style.height = Math.round(height) + 'px';
+
+    if (vidInfo.isEllipse) {
+      videoEl.style.borderRadius = '50%';
+      videoEl.style.objectFit = 'cover';
+    } else {
+      videoEl.style.borderRadius = '4px';
+      videoEl.style.objectFit = 'contain';
+    }
+  }
+
+  function repositionMountedVideos() {
+    if (currentVideoEl && currentVideoInfo) {
+      positionVideoElement(currentVideoEl, currentVideoInfo);
+    }
   }
 
   function toggleVideoPlayback() {
     if (!currentVideoEl) return;
+    if (!isPresenting) {
+      enterPresentation();
+    }
     if (currentVideoEl.paused || currentVideoEl.ended) {
       if (currentVideoEl.ended) currentVideoEl.currentTime = 0;
       currentVideoEl.play().catch(e => console.warn('Video play blocked:', e));
@@ -735,6 +804,8 @@
   document.addEventListener('fullscreenchange', () => {
     if (!document.fullscreenElement && isPresenting) {
       exitPresentation();
+    } else if (engineType) {
+      renderCurrentSlide();
     }
   });
 
