@@ -28,34 +28,6 @@ Designed with a clean, distraction-free aesthetic:
 
 ---
 
-## Local Testing (Run on your PC right now)
-
-To test the application locally:
-
-1. Double-click `start-server.bat` in this folder (or run `python -m http.server 8000` in PowerShell).
-2. It will open `http://localhost:8000` in **Chrome** or **Edge**.
-3. Click **"Try Demo Deck"** to load the built-in PowerPoint presentation (`sample-presentation.pptx`), or drag and drop your own `.pptx` file.
-4. Scan the QR code with your phone (or open the generated link in a second browser window to simulate the phone).
-
----
-
-## Deploying to GitHub Pages (Free Worldwide Hosting)
-
-Since you already have GitHub open in your Chrome profile, you can publish this in under 1 minute:
-
-1. In your GitHub tab in Chrome, click the **`+`** icon in the top right corner and select **New repository**.
-2. Name the repository `remote-slides` (or any name you prefer) and keep it **Public**.
-3. Under the *Quick setup* section, click the link that says **"uploading an existing file"**.
-4. Drag and drop all files and folders from `remote-slides` (`index.html`, `remote.html`, `sample-presentation.pptx`, `sample-presentation.pdf`, `css`, `js`, `vendor`) into the GitHub upload area.
-5. Click **Commit changes**.
-6. In your new repository on GitHub:
-   - Go to **Settings** > **Pages** (in the left sidebar).
-   - Under **Build and deployment > Branch**, select `main` (or `master`) and folder `/ (root)`.
-   - Click **Save**.
-7. GitHub Pages will give you your permanent public HTTPS URL (e.g. `https://<your-username>.github.io/remote-slides/`).
-
----
-
 ## Presentation Shortcuts on PC
 
 | Key | Action |
