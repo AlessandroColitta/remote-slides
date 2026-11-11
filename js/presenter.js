@@ -21,9 +21,16 @@
 
   // Video Reproduction State
   let currentZip = null;
-  let slideVideos = {}; // 0-based slideIndex -> [{ targetPath, xPct, yPct, wPct, hPct }]
+  let slideVideos = {}; // 0-based slideIndex -> [{ targetPath, xPct, yPct, wPct, hPct, isEllipse, playOnClick, trimStartSec, trimEndSec, hasPoster }]
   let currentVideoEl = null;
   let currentVideoBlobUrl = null;
+  let currentVideoInfo = null;
+  let videoBlobCache = {};
+  let mountedSlideIndex = -1;
+  let mountingSlideIndex = -1;
+  let videoMountSeq = 0;
+  let clickPlayTriggered = false;
+  let pendingClickPlay = false;
 
   // Laser Pointer State
   let isLaserActive = false;
@@ -204,8 +211,8 @@
 
   function sendSync(targetConn) {
     const hasVid = !!currentVideoEl;
-    const isPlaying = hasVid && !currentVideoEl.paused && !currentVideoEl.ended;
-    const isEnded = hasVid && currentVideoEl.ended;
+    const isEnded = hasVid && !!(currentVideoEl.ended || currentVideoEl._trimEnded);
+    const isPlaying = hasVid && !currentVideoEl.paused && !isEnded;
 
     const payload = {
       action: 'sync',
@@ -250,18 +257,11 @@
         setLaserState(data.active, data.x, data.y);
         break;
       case 'video_toggle':
-        if (!isPresenting) {
-          enterPresentation();
-        }
         toggleVideoPlayback();
         break;
       case 'video_play':
-        if (!isPresenting) {
-          enterPresentation();
-        }
-        if (currentVideoEl && currentVideoEl.paused) {
-          currentVideoEl.play().catch(() => {});
-          sendSync();
+        if (currentVideoEl && (currentVideoEl.paused || currentVideoEl.ended || currentVideoEl._trimEnded)) {
+          playCurrentVideo();
         }
         break;
       case 'video_pause':
@@ -311,7 +311,60 @@
   // Video Reproduction Engine
   // ==========================================
 
-  let currentVideoInfo = null;
+  function findFirstNS(root, localName) {
+    if (!root) return null;
+    const list = root.getElementsByTagNameNS('*', localName);
+    return list && list.length > 0 ? list[0] : null;
+  }
+
+  function findAllNS(root, localName) {
+    if (!root) return [];
+    return Array.from(root.getElementsByTagNameNS('*', localName));
+  }
+
+  function getRelAttr(el, attrName) {
+    if (!el) return null;
+    return (
+      el.getAttributeNS('http://schemas.openxmlformats.org/officeDocument/2006/relationships', attrName) ||
+      el.getAttribute('r:' + attrName) ||
+      el.getAttribute(attrName) ||
+      null
+    );
+  }
+
+  function parseClickSequenceVideoIds(slideDoc) {
+    const clickSpIds = new Set();
+    const cTns = findAllNS(slideDoc, 'cTn');
+    const mainSeq = cTns.find(node => node.getAttribute('nodeType') === 'mainSeq');
+    if (!mainSeq) return clickSpIds;
+
+    // Look for click-triggered media playback actions inside mainSeq (ignore interactiveSeq hover/direct click pauses)
+    findAllNS(mainSeq, 'cTn').forEach(node => {
+      if (node.getAttribute('nodeType') !== 'clickEffect') return;
+      const presetClass = node.getAttribute('presetClass') || '';
+      const presetId = node.getAttribute('presetID') || '';
+      const cmds = findAllNS(node, 'cmd');
+
+      let isMediaPlay = false;
+      if (cmds.length > 0) {
+        isMediaPlay = cmds.some(c => {
+          const cmdStr = (c.getAttribute('cmd') || '').toLowerCase();
+          return cmdStr.startsWith('play') || (presetClass === 'mediacall' && !cmdStr.includes('pause') && !cmdStr.includes('stop'));
+        });
+      } else if (presetClass === 'mediacall' && presetId === '1') {
+        isMediaPlay = true;
+      }
+
+      if (isMediaPlay) {
+        findAllNS(node, 'spTgt').forEach(tgt => {
+          const spid = tgt.getAttribute('spid');
+          if (spid) clickSpIds.add(spid);
+        });
+      }
+    });
+
+    return clickSpIds;
+  }
 
   async function scanPptxVideos(zip) {
     slideVideos = {};
@@ -320,7 +373,7 @@
       if (!presXmlStr) return;
       const parser = new DOMParser();
       const presDoc = parser.parseFromString(presXmlStr, 'application/xml');
-      const sldSz = presDoc.querySelector('sldSz, p\\:sldSz');
+      const sldSz = findFirstNS(presDoc, 'sldSz');
       const sldW = parseInt(sldSz?.getAttribute('cx')) || 12192000;
       const sldH = parseInt(sldSz?.getAttribute('cy')) || 6858000;
 
@@ -337,10 +390,22 @@
 
         relsDoc.querySelectorAll('Relationship').forEach(rel => {
           const type = rel.getAttribute('Type') || '';
+          const targetMode = (rel.getAttribute('TargetMode') || '').toLowerCase();
+          const rawTarget = rel.getAttribute('Target') || '';
+          if (targetMode === 'external' || !rawTarget || rawTarget.toUpperCase() === 'NULL') {
+            return;
+          }
           if (type.includes('video') || type.includes('media')) {
             const id = rel.getAttribute('Id');
-            const target = rel.getAttribute('Target').replace('../', 'ppt/');
-            vidMap[id] = target;
+            let target = rawTarget.replace(/\\/g, '/').replace(/^\/+/, '');
+            if (target.startsWith('../')) {
+              target = target.replace(/^(\.\.\/)+/, 'ppt/');
+            } else if (!target.startsWith('ppt/')) {
+              target = 'ppt/slides/' + target;
+            }
+            if (zip.file(target)) {
+              vidMap[id] = target;
+            }
           }
         });
 
@@ -348,36 +413,42 @@
 
         const slideXml = await slideFile.async('text');
         const slideDoc = parser.parseFromString(slideXml, 'application/xml');
-        const pics = slideDoc.querySelectorAll('pic, p\\:pic');
+        const clickVideoSpIds = parseClickSequenceVideoIds(slideDoc);
+        const pics = findAllNS(slideDoc, 'pic');
         const vids = [];
 
         pics.forEach(pic => {
-          const vidLink = pic.querySelector('videoFile, a\\:videoFile');
-          const mediaEmbed = pic.querySelector('media, p14\\:media');
-          const rId = vidLink?.getAttribute('r:link') || mediaEmbed?.getAttribute('r:embed');
+          const vidLink = findFirstNS(pic, 'videoFile') || findFirstNS(pic, 'quickTimeFile');
+          const mediaEmbed = findFirstNS(pic, 'media');
+          const rEmbed = getRelAttr(mediaEmbed, 'embed') || getRelAttr(mediaEmbed, 'link');
+          const rLink = getRelAttr(vidLink, 'link') || getRelAttr(vidLink, 'embed');
+          const rId = (rEmbed && vidMap[rEmbed]) ? rEmbed : ((rLink && vidMap[rLink]) ? rLink : null);
 
           if (rId && vidMap[rId]) {
+            const cNvPr = findFirstNS(pic, 'cNvPr');
+            const spId = cNvPr?.getAttribute('id') || '';
+
             // Locate xfrm (transform) specifically inside shape properties
-            const xfrm = pic.querySelector('xfrm, a\\:xfrm, p\\:xfrm');
-            const off = xfrm ? xfrm.querySelector('off, a\\:off') : pic.querySelector('off, a\\:off');
+            const xfrm = findFirstNS(pic, 'xfrm');
+            const off = findFirstNS(xfrm || pic, 'off');
 
             // Find ext element that has cx/cy attributes (avoiding a:extLst/a:ext metadata)
-            let ext = null;
-            if (xfrm) {
-              ext = xfrm.querySelector('ext, a\\:ext');
-            }
+            let ext = xfrm ? findFirstNS(xfrm, 'ext') : null;
             if (!ext || !ext.getAttribute('cx')) {
-              const allExts = pic.querySelectorAll('ext, a\\:ext');
-              for (const e of allExts) {
-                if (e.getAttribute('cx')) {
-                  ext = e;
-                  break;
-                }
-              }
+              const allExts = findAllNS(pic, 'ext');
+              ext = allExts.find(e => e.getAttribute('cx')) || null;
             }
 
-            const geom = pic.querySelector('prstGeom, a\\:prstGeom');
+            const geom = findFirstNS(pic, 'prstGeom');
             const isEllipse = geom?.getAttribute('prst') === 'ellipse';
+            const blip = findFirstNS(pic, 'blip');
+            const hasPoster = !!(blip && (getRelAttr(blip, 'embed') || getRelAttr(blip, 'link')));
+
+            const trimEl = mediaEmbed ? findFirstNS(mediaEmbed, 'trim') : findFirstNS(pic, 'trim');
+            const trimStMs = parseFloat(trimEl?.getAttribute('st'));
+            const trimEndMs = parseFloat(trimEl?.getAttribute('end'));
+            const trimStartSec = (!isNaN(trimStMs) && trimStMs > 0) ? trimStMs / 1000 : 0;
+            const trimEndSec = (!isNaN(trimEndMs) && trimEndMs > 0) ? trimEndMs / 1000 : 0;
 
             const x = parseInt(off?.getAttribute('x')) || 0;
             const y = parseInt(off?.getAttribute('y')) || 0;
@@ -403,7 +474,11 @@
               yPct,
               wPct,
               hPct,
-              isEllipse
+              isEllipse,
+              hasPoster,
+              playOnClick: spId ? clickVideoSpIds.has(spId) : false,
+              trimStartSec,
+              trimEndSec
             });
           }
         });
@@ -417,56 +492,147 @@
     }
   }
 
-  async function mountSlideVideos() {
-    // Teardown existing video
+  function clearVideoBlobCache() {
+    Object.values(videoBlobCache).forEach(url => URL.revokeObjectURL(url));
+    videoBlobCache = {};
+  }
+
+  function teardownCurrentVideo() {
+    videoMountSeq++;
+    mountingSlideIndex = -1;
+    pendingClickPlay = false;
     if (currentVideoEl) {
       currentVideoEl.pause();
       currentVideoEl.remove();
       currentVideoEl = null;
     }
-    if (currentVideoBlobUrl) {
-      URL.revokeObjectURL(currentVideoBlobUrl);
-      currentVideoBlobUrl = null;
-    }
+    videoLayer.innerHTML = '';
+    currentVideoBlobUrl = null;
     currentVideoInfo = null;
+    mountedSlideIndex = -1;
+    clickPlayTriggered = false;
+  }
 
+  async function mountSlideVideos() {
     const slideIndex = currentPage - 1;
+
+    // Preserve active video when resizing or toggling fullscreen on the same slide
+    if (currentVideoEl && mountedSlideIndex === slideIndex) {
+      positionVideoElement(currentVideoEl, currentVideoInfo);
+      sendSync();
+      return;
+    }
+    if (mountingSlideIndex === slideIndex) {
+      return;
+    }
+
+    teardownCurrentVideo();
+
     const vids = slideVideos[slideIndex];
     if (vids && vids.length > 0 && currentZip) {
       // Prefer modern playable formats (mp4, webm) over legacy avi
       const vidInfo = vids.find(v => !v.targetPath.toLowerCase().endsWith('.avi')) || vids[0];
       const vidFile = currentZip.file(vidInfo.targetPath);
       if (vidFile) {
+        const myMountSeq = ++videoMountSeq;
+        mountingSlideIndex = slideIndex;
         try {
-          const arrayBuffer = await vidFile.async('arraybuffer');
-          const targetLower = vidInfo.targetPath.toLowerCase();
-          let mime = 'video/mp4';
-          if (targetLower.endsWith('.webm')) mime = 'video/webm';
-          else if (targetLower.endsWith('.ogv') || targetLower.endsWith('.ogg')) mime = 'video/ogg';
-          else if (targetLower.endsWith('.mov')) mime = 'video/quicktime';
+          let blobUrl = videoBlobCache[vidInfo.targetPath];
+          if (!blobUrl) {
+            const arrayBuffer = await vidFile.async('arraybuffer');
+            if (myMountSeq !== videoMountSeq || currentPage - 1 !== slideIndex) {
+              return;
+            }
+            const targetLower = vidInfo.targetPath.toLowerCase();
+            let mime = 'video/mp4';
+            if (targetLower.endsWith('.webm')) mime = 'video/webm';
+            else if (targetLower.endsWith('.ogv') || targetLower.endsWith('.ogg')) mime = 'video/ogg';
+            else if (targetLower.endsWith('.mov')) mime = 'video/quicktime';
 
-          const blob = new Blob([arrayBuffer], { type: mime });
-          currentVideoBlobUrl = URL.createObjectURL(blob);
-          currentVideoEl = document.createElement('video');
-          currentVideoEl.src = currentVideoBlobUrl;
-          currentVideoEl.playsInline = true;
-          currentVideoEl.className = 'presentation-video';
-          currentVideoEl.preload = 'auto';
+            const blob = new Blob([arrayBuffer], { type: mime });
+            blobUrl = URL.createObjectURL(blob);
+            videoBlobCache[vidInfo.targetPath] = blobUrl;
+          }
+
+          currentVideoBlobUrl = blobUrl;
+          const videoEl = document.createElement('video');
+          videoEl.src = currentVideoBlobUrl;
+          videoEl.playsInline = true;
+          videoEl.className = 'presentation-video';
+          videoEl.preload = 'auto';
+          if (vidInfo.hasPoster) {
+            videoEl.style.opacity = '0';
+          }
+
+          currentVideoEl = videoEl;
           currentVideoInfo = vidInfo;
+          mountedSlideIndex = slideIndex;
 
-          positionVideoElement(currentVideoEl, vidInfo);
+          positionVideoElement(videoEl, vidInfo);
 
-          currentVideoEl.addEventListener('play', () => sendSync());
-          currentVideoEl.addEventListener('pause', () => sendSync());
-          currentVideoEl.addEventListener('ended', () => sendSync());
-          currentVideoEl.addEventListener('click', (e) => {
+          videoEl.addEventListener('loadedmetadata', () => {
+            if (currentVideoEl !== videoEl || videoEl._trimInitialized) return;
+            videoEl._trimInitialized = true;
+            const trimStart = vidInfo.trimStartSec || 0;
+            const dur = videoEl.duration;
+            if (vidInfo.trimEndSec > 0 && isFinite(dur)) {
+              videoEl._stopTime = Math.max(trimStart, dur - vidInfo.trimEndSec);
+            } else {
+              videoEl._stopTime = Infinity;
+            }
+            if (trimStart > 0 && isFinite(dur) && trimStart < dur && videoEl.currentTime < trimStart - 0.1) {
+              videoEl.currentTime = trimStart;
+            } else if (!videoEl.paused) {
+              videoEl.style.opacity = '1';
+            }
+          });
+
+          videoEl.addEventListener('seeked', () => {
+            if (currentVideoEl !== videoEl) return;
+            if (!videoEl.paused && !videoEl._trimEnded) {
+              videoEl.style.opacity = '1';
+            }
+          });
+
+          videoEl.addEventListener('timeupdate', () => {
+            if (currentVideoEl !== videoEl) return;
+            if (videoEl._stopTime && isFinite(videoEl._stopTime) && videoEl.currentTime >= videoEl._stopTime) {
+              videoEl.pause();
+              videoEl._trimEnded = true;
+              sendSync();
+            }
+          });
+
+          videoEl.addEventListener('play', () => {
+            if (currentVideoEl !== videoEl) return;
+            videoEl._trimEnded = false;
+            const trimStart = vidInfo.trimStartSec || 0;
+            if (!vidInfo.hasPoster || trimStart === 0 || videoEl.currentTime >= trimStart - 0.25) {
+              videoEl.style.opacity = '1';
+            }
+            sendSync();
+          });
+          videoEl.addEventListener('pause', () => sendSync());
+          videoEl.addEventListener('ended', () => sendSync());
+          videoEl.addEventListener('click', (e) => {
             e.stopPropagation();
             toggleVideoPlayback();
           });
 
-          videoLayer.appendChild(currentVideoEl);
+          videoLayer.innerHTML = '';
+          videoLayer.appendChild(videoEl);
+          if (mountingSlideIndex === slideIndex) {
+            mountingSlideIndex = -1;
+          }
+          if (pendingClickPlay && vidInfo.playOnClick && !clickPlayTriggered) {
+            playCurrentVideo();
+          }
         } catch (e) {
           console.warn('Could not mount video:', e);
+        } finally {
+          if (mountingSlideIndex === slideIndex) {
+            mountingSlideIndex = -1;
+          }
         }
       }
     }
@@ -506,18 +672,49 @@
     }
   }
 
+  function playCurrentVideo() {
+    if (!currentVideoEl) return;
+    if (!isPresenting) {
+      enterPresentation();
+    }
+    clickPlayTriggered = true;
+    pendingClickPlay = false;
+    const trimStart = currentVideoInfo?.trimStartSec || 0;
+    if (!currentVideoInfo?.hasPoster || trimStart === 0 || currentVideoEl.readyState >= 1) {
+      currentVideoEl.style.opacity = '1';
+    }
+    const isAtEnd = currentVideoEl.ended || currentVideoEl._trimEnded ||
+      (currentVideoEl._stopTime && isFinite(currentVideoEl._stopTime) && currentVideoEl.currentTime >= currentVideoEl._stopTime - 0.05);
+    if (isAtEnd) {
+      currentVideoEl._trimEnded = false;
+      currentVideoEl.currentTime = trimStart;
+    } else if (trimStart > 0 && currentVideoEl.readyState >= 1 && currentVideoEl.currentTime < trimStart - 0.1) {
+      currentVideoEl.currentTime = trimStart;
+    }
+    const playPromise = currentVideoEl.play();
+    if (playPromise && typeof playPromise.catch === 'function') {
+      playPromise.catch(err => {
+        console.warn('Video play blocked:', err);
+        if (currentVideoEl && !currentVideoEl.muted) {
+          currentVideoEl.muted = true;
+          currentVideoEl.play().catch(e2 => console.warn('Muted video play blocked:', e2));
+        }
+      });
+    }
+    sendSync();
+  }
+
   function toggleVideoPlayback() {
     if (!currentVideoEl) return;
     if (!isPresenting) {
       enterPresentation();
     }
-    if (currentVideoEl.paused || currentVideoEl.ended) {
-      if (currentVideoEl.ended) currentVideoEl.currentTime = 0;
-      currentVideoEl.play().catch(e => console.warn('Video play blocked:', e));
+    if (currentVideoEl.paused || currentVideoEl.ended || currentVideoEl._trimEnded) {
+      playCurrentVideo();
     } else {
       currentVideoEl.pause();
+      sendSync();
     }
-    sendSync();
   }
 
   // ==========================================
@@ -547,6 +744,8 @@
     }
 
     try {
+      teardownCurrentVideo();
+      clearVideoBlobCache();
       pptxViewer = new PptxViewJS.PPTXViewer({
         canvas: slideCanvas,
         maxFileSize: 1024 * 1024 * 1024,
@@ -599,6 +798,8 @@
     }
 
     try {
+      teardownCurrentVideo();
+      clearVideoBlobCache();
       let arrayBuffer = fileOrBuffer;
       if (typeof File !== 'undefined' && fileOrBuffer instanceof File) {
         arrayBuffer = await fileOrBuffer.arrayBuffer();
@@ -733,13 +934,29 @@
   }
 
   function nextPage() {
-    if (!engineType || currentPage >= totalPages) return;
+    if (!engineType) return;
+    // Start click-sequence video first before advancing to next slide
+    const slideIdx = currentPage - 1;
+    const slideVids = slideVideos[slideIdx];
+    if (!clickPlayTriggered && slideVids && slideVids.some(v => v.playOnClick)) {
+      if (currentVideoEl && currentVideoInfo && currentVideoInfo.playOnClick) {
+        playCurrentVideo();
+        return;
+      }
+      if (isRendering || mountingSlideIndex === slideIdx) {
+        pendingClickPlay = true;
+        return;
+      }
+    }
+    if (currentPage >= totalPages) return;
+    pendingClickPlay = false;
     currentPage++;
     renderCurrentSlide();
   }
 
   function prevPage() {
     if (!engineType || currentPage <= 1) return;
+    pendingClickPlay = false;
     currentPage--;
     renderCurrentSlide();
   }
@@ -747,6 +964,7 @@
   function goToPage(num) {
     if (!engineType) return;
     if (num >= 1 && num <= totalPages) {
+      pendingClickPlay = false;
       currentPage = num;
       renderCurrentSlide();
     }
